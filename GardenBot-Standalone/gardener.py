@@ -124,8 +124,7 @@ async def garden_explore(client):
     tells you which Icon# slot holds which seed so you can fill in SEED_SLOT."""
     root = client.root_window
     lines = []
-    await client.mouse_handler.activate_mouseless()
-    try:
+    async with client.mouse_handler:   # managed mouseless (coexists with Deimos's own mouse use)
         if not await root.get_windows_with_name("GardeningWindow"):
             lines.append("gardening menu NOT open -- open it (Seeds tab) before triggering, for seed IDs.")
         else:
@@ -149,11 +148,6 @@ async def garden_explore(client):
                     lines.append(f"  Icon{i}: info={txt!r} count={cnt!r}")
                 except Exception as e:
                     lines.append(f"  Icon{i}: read failed ({e})")
-    finally:
-        try:
-            await client.mouse_handler.deactivate_mouseless()
-        except Exception:
-            pass
     soils, plants, _ = await read_garden(client)
     vac = sorted([(s, l, d) for n, s, l, d in soils if not _occupied(l, plants)], key=lambda v: v[2])
     lines += ["", "nearest vacant plots projected to screen (client-relative pixels):"]
@@ -216,14 +210,8 @@ async def _open_gardening(client, root):
         logger.warning("[garden] OpenGardening button not found -- are you standing in your garden?")
         return False
     logger.info("[garden] clicking OpenGardening button...")
-    await client.mouse_handler.activate_mouseless()
-    try:
+    async with client.mouse_handler:   # managed mouseless (coexists with Deimos's own mouse use)
         await client.mouse_handler.click_window(ob)
-    finally:
-        try:
-            await client.mouse_handler.deactivate_mouseless()
-        except Exception:
-            pass
     await asyncio.sleep(1.3)
     _, ovis2 = await _win_state(root, "OpenGardening")
     _, cvis2 = await _win_state(root, "CloseGardening")
@@ -339,8 +327,7 @@ async def garden_plant(client, limit=None):
     logger.info(f"[garden] {len(targets)} plantable on-screen ({offscreen} off-screen); "
                 f"energy {e0}; limit {limit or 'ALL'}")
     planted, fails, prev_e, aborted = 0, 0, e0, False
-    await client.mouse_handler.activate_mouseless()
-    try:
+    async with client.mouse_handler:   # managed mouseless (coexists with Deimos's own mouse use)
         tab = await root.get_windows_with_name("Tab_Seeds")   # Seeds = 2nd tab, bottom-left of the gardening UI
         if tab:
             await client.mouse_handler.click_window(tab[0])
@@ -371,11 +358,6 @@ async def garden_plant(client, limit=None):
                 logger.warning(f"[garden] ABORT: {FAIL_ABORT} clicks in a row spent no energy "
                                f"(out of seeds/energy, or camera off-target). Stopping.")
                 break
-    finally:
-        try:
-            await client.mouse_handler.deactivate_mouseless()
-        except Exception:
-            pass
     # Settle to an ACCURATE count: new seedling entities register over a few seconds, so re-scan
     # until the vacant total is stable across two reads (a single early re-scan miscounts). Energy
     # is ground truth: only successful plants cost it.
