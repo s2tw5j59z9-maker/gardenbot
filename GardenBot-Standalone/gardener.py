@@ -14,12 +14,12 @@ How it plants (the hard-won bits):
     register through synthetic input, and the window visible-flags are unreliable.
   * Drops a top-down freecam over the bed (update_orientation, pitch = pi/2) so plots aren't
     occluded by standing seedlings and the screen projection is accurate.
-  * Plants farthest-first (top of screen down) so a new seedling never covers unplanted soil.
-  * Success == energy dropped (a missed click costs none); FAIL_ABORT no-energy clicks aborts.
+  * AUTO-DETECTS the seed slot per soil size: probes slots and watches energy (a real plant
+    lowers it -- POLLED, since a single read is too soon), then plants the rest of that size.
+  * Plants farthest-first; energy drop is the only success signal (the vacant count is noise).
 
 Cheat-Engine safe: every decision reads LIVE entities / UI, never a wall-clock timer.
 
->>> Edit SEED_SLOT / SEED_FOR_SIZE below for YOUR Seeds-tab layout (see README). <<<
 USE AT YOUR OWN RISK -- automation violates the Wizard101 Terms of Service.
 """
 import asyncio
@@ -28,28 +28,29 @@ import re
 from collections import Counter
 
 from loguru import logger
+from wizwalker import Keycode
 
 try:
     from src import world_to_screen as w2s   # type: ignore  # inside Deimos (src/ package)
 except Exception:                            # noqa: BLE001
     import world_to_screen as w2s            # type: ignore  # standalone bundle (sibling module)
 
-# soil size -> seed name (display only, for the scan report). Extend as needed.
+# soil size -> seed name. Values must match the in-game gardening-UI seed names (confirm
+# against the UI dump). Extend with more sizes/seeds as needed.
 SEED_FOR_SIZE = {
     "Large": "Couch Potatoes",
     "Medium": "Evil Magma Peas",
     # "Small": "Pink Dandelions",
 }
-# which Icon# slot on the Seeds tab holds the seed for each soil size. Slot numbers are the
-# item positions on the gardening "Seeds" tab (1 = first slot). CHANGE THESE to match your
-# own seed inventory order -- run the scan (writes _garden_scan.txt) to see your soil sizes.
+# Which soil sizes to plant. The number is an OPTIONAL slot HINT (tried first); the planter now
+# auto-detects the real slot per size by trying slots and watching energy, so the hint can be
+# wrong/stale and it self-corrects. Add a size to have the bot plant it; remove one to ignore it.
 SEED_SLOT = {
-    "Large": 1,    # Couch Potatoes
-    "Medium": 2,   # Evil Magma Peas
+    "Large": 1,    # Couch Potatoes (hint)
+    "Medium": 1,   # Evil Magma Peas (hint)
 }
 COLOCATE_DIST = 10.0
-FAIL_ABORT = 5     # consecutive clicks that spend no energy -> abort (out of seeds/energy, or camera off-target)
-
+FAIL_ABORT = 5   # consecutive clicks that spend no energy -> abort (out of seeds/energy, or camera off-target)
 _HERE = os.path.dirname(os.path.abspath(__file__))
 SCAN_PATH = os.path.join(_HERE, "_garden_scan.txt")
 UI_PATH = os.path.join(_HERE, "_garden_ui_tree.txt")
@@ -85,14 +86,12 @@ def _occupied(loc, plants):
 
 
 async def garden_scan(client):
-    """Diagnostic: dump every soil plot (vacant/planted) + sizes to _garden_scan.txt. Use this
-    to see your soil sizes so you can set SEED_SLOT. No menu needed; nothing is clicked."""
     soils, plants, others = await read_garden(client)
     vacant = [(n, s, l, d) for n, s, l, d in soils if not _occupied(l, plants)]
     lines = [f"soil plots: {len(soils)} | growing plants: {len(plants)} | VACANT: {len(vacant)}", "",
              "vacant by size:"]
     for size, n in sorted(Counter(s for _, s, _, _ in vacant).items()):
-        lines.append(f"  {size} x{n} -> would plant: {SEED_FOR_SIZE.get(size, '(unmapped! add to SEED_SLOT)')}")
+        lines.append(f"  {size} x{n} -> would plant: {SEED_FOR_SIZE.get(size, '(unmapped!)')}")
     lines += ["", "all soil plots (V=vacant  P=planted), nearest first:"]
     for n, s, l, d in sorted(soils, key=lambda v: v[3]):
         flag = "P" if _occupied(l, plants) else "V"
@@ -109,24 +108,22 @@ async def garden_scan(client):
 
 
 async def garden_dump_ui(client):
-    """Diagnostic: dump the whole UI window tree to _garden_ui_tree.txt (have the gardening menu
-    OPEN first). Use it to confirm button/window names if your client differs."""
     tree = await client.root_window.get_ui_tree_stringified()
     with open(UI_PATH, "w", encoding="utf-8") as f:
         f.write(tree)
     logger.info(f"[garden] UI tree -> {UI_PATH} ({tree.count(chr(10))} lines). "
-                f"(Have the gardening menu OPEN when you trigger this.)")
+                f"(Have the gardening menu OPEN when you press the hotkey.)")
 
 
 async def garden_explore(client):
-    """Diagnostic dry-run: switch to the Seeds tab, hover each item slot to read its seed name,
-    and project the nearest vacant plots to screen. Clicks NO plots and plants nothing -- it just
-    tells you which Icon# slot holds which seed so you can fill in SEED_SLOT."""
+    """SAFE planting dry-run -- switch to the Seeds tab, hover each item slot to read its name
+    (GardeningInfoText), and project the nearest vacant plots to screen. Clicks NO plots and
+    plants nothing; just gathers what the real planter needs (seed->slot map + projection)."""
     root = client.root_window
     lines = []
     async with client.mouse_handler:   # managed mouseless (coexists with Deimos's own mouse use)
         if not await root.get_windows_with_name("GardeningWindow"):
-            lines.append("gardening menu NOT open -- open it (Seeds tab) before triggering, for seed IDs.")
+            lines.append("gardening menu NOT open -- open it (Seeds tab) before pressing, for seed IDs.")
         else:
             tab = await root.get_windows_with_name("Tab_Seeds")
             if tab:
@@ -195,10 +192,10 @@ async def _menu_open(root):
 async def _open_gardening(client, root):
     """Open the menu by CLICKING the in-world 'OpenGardening' HUD button (the plant icon). 'G' won't
     register via synthetic input, AND the window visible-flags are unreliable -- they stay set while
-    the menu is hidden, and that false 'already open' is exactly why a click can get skipped and
-    nothing plants. So we do NOT trust an is-open check: we always click. OpenGardening only opens
-    (CloseGardening is a separate button), so a redundant click is harmless. Logs the live flag
-    states (before + after) so a reliable open-signal can be picked if a client differs."""
+    the menu is hidden, and that false 'already open' is exactly why the click kept getting skipped
+    and nothing ever planted. So we do NOT trust an is-open check: we always click. OpenGardening
+    only opens (CloseGardening is a separate button), so a redundant click is harmless. Logs the
+    live flag states (before + after) so a reliable open-signal can be picked if needed."""
     ob, ovis = await _win_state(root, "OpenGardening")
     cb, cvis = await _win_state(root, "CloseGardening")
     gw, gvis = await _win_state(root, "GardeningWindow")
@@ -253,7 +250,7 @@ async def _enter_topdown_freecam(client):
             cam = await w2s.get_camera_state(client)
             if not cam:
                 continue
-            mx, my = cam['client_w'] * 0.12, cam['client_h'] * 0.12   # 12% margin -> zoom out for breathing room
+            mx, my = cam['client_w'] * 0.12, cam['client_h'] * 0.12   # 12% margin -> zoom out enough for breathing room
             on = 0
             for l in near:
                 sc = w2s.project_point(cam, l.x, l.y, l.z)
@@ -284,11 +281,34 @@ async def _exit_freecam(client):
         logger.warning(f"[garden] camera restore failed ({e}).")
 
 
+async def _plant_at(client, root, slot, sc, prev_e):
+    """Select seed Icon{slot}, click the plot at screen sc, then POLL energy for a couple seconds
+    to catch the drop. Planting lowers energy; a wrong-size/empty-seed click doesn't -- so an
+    energy DROP means that slot's seed fits this plot. (A single immediate read misses the drop;
+    that was the earlier bug -- hence the poll.) Returns (planted_bool, latest_energy). Mouseless
+    must be active."""
+    icon = await root.get_windows_with_name(f"Icon{slot}")
+    if not icon:
+        return False, prev_e
+    await client.mouse_handler.click_window(icon[0])
+    await asyncio.sleep(0.25)
+    await client.mouse_handler.click(sc[0], sc[1])
+    last = prev_e
+    for _ in range(6):                       # poll up to ~2.4s for the energy drop to register
+        await asyncio.sleep(0.4)
+        cur_e = await _read_energy(client)
+        if cur_e is not None:
+            last = cur_e
+            if prev_e is not None and cur_e < prev_e:
+                return True, cur_e
+    return False, last
+
+
 async def garden_plant(client, limit=None):
-    """One press: open the gardening menu, drop into a top-down freecam over the nearby bed, then
-    plant every framed vacant plot FARTHEST-FIRST (so new seedlings never occlude unplanted soil),
-    choosing the seed mapped to each soil size. Stops after FAIL_ABORT no-energy clicks in a row,
-    then restores the camera. CE-safe: live state + window-message clicks."""
+    """One press: foreground the client, open the gardening menu (G), drop into a top-down freecam
+    over the nearby bed, then plant every framed vacant plot FARTHEST-FIRST (so new seedlings never
+    occlude unplanted soil), auto-learning which seed slot plants each soil size. Stops after FAIL_ABORT
+    no-energy clicks in a row, then restores the camera. CE-safe: live state + window-msg clicks."""
     import ctypes
     import ctypes.wintypes
     root = client.root_window
@@ -297,7 +317,7 @@ async def garden_plant(client, limit=None):
         logger.warning("[garden] could not open gardening menu -- aborting (are you in your garden?).")
         return
 
-    # Top-down freecam over the bed: no occlusion + accurate projection.
+    # Top-down freecam over the bed: no occlusion + accurate projection (the method you verified).
     freecam_set = await _enter_topdown_freecam(client)
     if not await _menu_open(root):
         logger.info("[garden] menu not open after freecam -- reopening.")
@@ -326,59 +346,68 @@ async def garden_plant(client, limit=None):
     e0 = await _read_energy(client)
     logger.info(f"[garden] {len(targets)} plantable on-screen ({offscreen} off-screen); "
                 f"energy {e0}; limit {limit or 'ALL'}")
-    planted, fails, prev_e, aborted = 0, 0, e0, False
+    planted, fails, aborted = 0, 0, False
+    learned = {}   # soil size -> the Icon slot that actually plants it (auto-detected via energy)
+    cur_e = e0
     async with client.mouse_handler:   # managed mouseless (coexists with Deimos's own mouse use)
         tab = await root.get_windows_with_name("Tab_Seeds")   # Seeds = 2nd tab, bottom-left of the gardening UI
         if tab:
             await client.mouse_handler.click_window(tab[0])
             await asyncio.sleep(0.5)
+        slots = [i for i in range(1, 11) if await root.get_windows_with_name(f"Icon{i}")]
         for size, loc, sc in targets:
             if limit is not None and planted >= limit:
                 break
-            icon = await root.get_windows_with_name(f"Icon{SEED_SLOT[size]}")
-            if not icon:
-                logger.warning(f"[garden] Icon{SEED_SLOT[size]} (for {size}) not found")
-                continue
-            await client.mouse_handler.click_window(icon[0])     # select the seed
-            await asyncio.sleep(0.25)
-            await client.mouse_handler.click(sc[0], sc[1])        # click the plot to plant it
-            await asyncio.sleep(0.45)
-            planted += 1
-            # Success == energy dropped (a missed/blocked click costs nothing). Track the streak of
-            # no-cost clicks; bail if the planter clearly isn't landing (out of seeds/energy, bad cam).
-            cur_e = await _read_energy(client)
-            if cur_e is not None and prev_e is not None:
-                fails = 0 if cur_e < prev_e else fails + 1   # only judge when energy is actually readable
-            if cur_e is not None:
-                prev_e = cur_e
-            logger.info(f"[garden] clicked {size} #{planted} XYZ({loc.x:.0f},{loc.y:.0f},{loc.z:.0f}) "
-                        f"-> {sc} | energy {cur_e} | fail-streak {fails}")
-            if fails >= FAIL_ABORT:
-                aborted = True
-                logger.warning(f"[garden] ABORT: {FAIL_ABORT} clicks in a row spent no energy "
-                               f"(out of seeds/energy, or camera off-target). Stopping.")
-                break
-    # Settle to an ACCURATE count: new seedling entities register over a few seconds, so re-scan
-    # until the vacant total is stable across two reads (a single early re-scan miscounts). Energy
-    # is ground truth: only successful plants cost it.
-    vac2 = None
-    for _ in range(6):
-        await asyncio.sleep(1.5)
-        soils2, plants2, _ = await read_garden(client)
-        v = sum(1 for n, s, l, d in soils2 if not _occupied(l, plants2))
-        if v == vac2:
-            break
-        vac2 = v
+            xyz = f"XYZ({loc.x:.0f},{loc.y:.0f},{loc.z:.0f})"
+            if size in learned:
+                slot = learned[size]
+                if slot is None:
+                    continue   # already probed -- nothing in the menu plants this size
+                took, cur_e = await _plant_at(client, root, slot, sc, cur_e)
+                if took:
+                    planted += 1
+                    fails = 0
+                    logger.info(f"[garden] planted {size} #{planted} (slot {slot}) {xyz} | energy {cur_e}")
+                else:
+                    fails += 1   # the learned slot stopped planting -> out of that seed (or off-target)
+                    logger.info(f"[garden] {size} slot {slot} no plant {xyz} | energy {cur_e} | fail-streak {fails}")
+                    if fails >= FAIL_ABORT:
+                        aborted = True
+                        logger.warning(f"[garden] ABORT: {FAIL_ABORT} no-plant clicks in a row "
+                                       f"(out of seeds/energy, or camera off-target). Stopping.")
+                        break
+            else:
+                # First plot of this size: probe slots (hint first) until energy drops = it planted.
+                order = list(slots)
+                hint = SEED_SLOT.get(size)
+                if hint in order:
+                    order.remove(hint)
+                    order.insert(0, hint)
+                hit = None
+                for slot in order:
+                    took, cur_e = await _plant_at(client, root, slot, sc, cur_e)
+                    if took:
+                        hit = slot
+                        break
+                learned[size] = hit
+                if hit is not None:
+                    planted += 1
+                    fails = 0
+                    logger.info(f"[garden] learned {size} -> slot {hit}; planted #{planted} {xyz} | energy {cur_e}")
+                else:
+                    logger.warning(f"[garden] no slot plants {size} (tried {order}); skipping {size} plots.")
     e1 = await _read_energy(client)
-    spent = f"{e0 - e1} spent" if (e0 is not None and e1 is not None) else "energy n/a"
-    logger.info(f"[garden] {'ABORTED' if aborted else 'done'}: clicked {planted} ({offscreen} off-screen); "
-                f"vacant {vac1} -> {vac2}; energy {e0} -> {e1} ({spent} -- only plots that planted cost energy)")
+    spent = (e0 - e1) if (e0 is not None and e1 is not None) else None
+    logger.info(f"[garden] {'ABORTED' if aborted else 'done'}: planted {planted} ({offscreen} off-screen); "
+                f"energy {e0} -> {e1}"
+                + (f" ({spent} spent)" if spent is not None else "")
+                + f"; detected slots {learned}")
     if freecam_set:
         await _exit_freecam(client)
 
 
 async def run_diagnostic(client):
-    """Entry point for the planter (the standalone hotkey and Deimos both call this name)."""
+    # Hotkey entry point (Deimos.py calls this name). Runs the full auto-planter.
     logger.info("[garden] hotkey fired -- starting auto-planter.")
     try:
         await garden_plant(client)
