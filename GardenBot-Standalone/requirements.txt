@@ -1,0 +1,9 @@
+# wizwalker's runtime dependencies (wizwalker itself is bundled in ./wizwalker).
+# Pinned to the versions this bot was validated against -- newer ones usually work,
+# but if hooking misbehaves, install these exact versions.
+pymem==1.13.1
+janus==2.0.0
+regex==2026.5.9
+appdirs==1.4.4
+aiofiles==25.1.0
+loguru==0.7.3

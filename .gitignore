@@ -1,0 +1,16 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Local diagnostic outputs written next to gardener.py at runtime
+_garden_*.txt
+
+# Build artifacts / backups (regenerable; keep them out of history)
+*.zip
+*.bak
+
+# Editor / OS cruft
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
