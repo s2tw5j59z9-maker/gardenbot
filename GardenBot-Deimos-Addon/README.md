@@ -67,11 +67,11 @@ For people not running Deimos, use the standalone version instead (separate fold
    one bed per press; reposition and press again for another bed.
 
 Watch the Deimos console for `[garden]` lines, it logs the menu state, the camera framing
-(`freecam H=… framed`), each plant, and a final `done/ABORTED … energy … spent`.
+(`freecam H=... framed`), each plant, and a final `done/ABORTED ... energy ... spent`.
 
 ## One-time setup: map seeds to plot sizes
 
-Edit `src/gardener.py` → `SEED_SLOT`:
+Edit `src/gardener.py` -> `SEED_SLOT`:
 ```python
 SEED_SLOT = {
     "Large": 1,    # seed in slot 1 of your Seeds tab -> Large plots
@@ -84,7 +84,7 @@ sizes get planted. Not sure of your soil sizes? `gardener.garden_scan(client)` w
 
 ## Notes & troubleshooting
 
-- It stops after ~5 clicks with "ABORT … spent no energy" | intended: you're
+- It stops after ~5 clicks with "ABORT ... spent no energy" | intended: you're
   out of seeds/energy, or the camera wasn't over the bed. Restock / reposition and retry.
 - Menu won't open | you must be standing in your garden. The console's `menu state ->`
   line shows whether the `OpenGardening` button was found.

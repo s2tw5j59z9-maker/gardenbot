@@ -35,7 +35,7 @@ async def get_camera_state(client):
 
 	return {
 		'cam_x': cam_pos.x, 'cam_y': cam_pos.y, 'cam_z': cam_pos.z,
-		# Camera axes in world space (base × yaw_matrix × pitch_matrix)
+		# Camera axes in world space (base x yaw_matrix x pitch_matrix)
 		'fwd_x': -sin_y * cos_p, 'fwd_y': -cos_y * cos_p, 'fwd_z': -sin_p,
 		'right_x': -cos_y, 'right_y': sin_y, 'right_z': 0.0,
 		'up_x': -sin_y * sin_p, 'up_y': -cos_y * sin_p, 'up_z': cos_p,

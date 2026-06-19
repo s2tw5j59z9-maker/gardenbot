@@ -10,7 +10,7 @@ USE AT YOUR OWN RISK -- automation violates the Wizard101 Terms of Service.
 ## What you need
 
 - **Windows** (the memory hooks are Windows-only)
-- **Python 3.10–3.12** | get it from <https://www.python.org/downloads/> and tick
+- **Python 3.10-3.12** | get it from <https://www.python.org/downloads/> and tick
   *"Add Python to PATH"* during install
 - **Wizard101**, installed and logged in
 
@@ -26,7 +26,7 @@ USE AT YOUR OWN RISK -- automation violates the Wizard101 Terms of Service.
    | Hotkey | Action |
    |---|---|
    | **Ctrl + Alt + G** | Plant the bed you're standing in |
-   | **Ctrl + Alt + S** | Scan your soil → writes `_garden_scan.txt` (use it to set up seeds) |
+   | **Ctrl + Alt + S** | Scan your soil -> writes `_garden_scan.txt` (use it to set up seeds) |
    | **Ctrl + Alt + K** | Quit (restores your camera) |
 
 You can reposition to another bed and press **Ctrl + Alt + G** again. It plants one bed per
@@ -44,10 +44,10 @@ SEED_SLOT = {
 }
 ```
 
-- The **size** keys (`Large`, `Medium`, `Small`, …) are the soil sizes the **Ctrl+Alt+S** scan
+- The **size** keys (`Large`, `Medium`, `Small`, ...) are the soil sizes the **Ctrl+Alt+S** scan
   reports for your garden (see `_garden_scan.txt`).
 - The **number** is the seed's position on the gardening **Seeds tab** (1 = first slot, 2 =
-  second, …). Put the seed you want for that plot size in that slot, in-game.
+  second, ...). Put the seed you want for that plot size in that slot, in-game.
 - Only sizes listed in `SEED_SLOT` are planted; others are skipped.
 
 That's the only thing most people need to change.
@@ -85,7 +85,7 @@ That's the only thing most people need to change.
 ```
 plant_bot.py        the launcher (run this; or use run.bat)
 gardener.py         the planter logic + SEED_SLOT config
-world_to_screen.py  world→screen projection (camera math)
+world_to_screen.py  world->screen projection (camera math)
 wizwalker/          the bundled memory-hook library (do not edit)
 requirements.txt    Python dependencies
 run.bat             one-click installer + launcher
