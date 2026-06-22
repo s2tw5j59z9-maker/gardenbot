@@ -3,6 +3,18 @@
 All notable changes to GardenBot. (Wizard101 gardening automation built on wizwalker - see the
 READMEs. Use at your own risk; it violates the game's Terms of Service.)
 
+## v1.2 - 2026-06-22
+### Added
+- **Harvest hotkey (Ctrl+Alt+H).** Harvests every ready plant: finds each `HarvestEffect` marker,
+  teleports onto it, taps X, then loops/re-scans until the bed is clear or a pass makes no progress
+  (self-confirming). No freecam, clicks, or energy needed. The standalone wires it in
+  `plant_bot.py`; the Deimos add-on installer/README print the handler + registration, with a note
+  to add it to any focus-loss hotkey exclude list. Validated: a 44-plant bed cleared to 0 in 3
+  passes (~18s).
+### Fixed
+- READMEs now describe `SEED_SLOT` correctly as an optional, auto-detected hint (it was still
+  documented as required setup).
+
 ## v1.1 - 2026-06-19
 ### Changed
 - **Dynamic seed-slot detection.** The planter now auto-detects which seed slot plants each soil

@@ -1,8 +1,8 @@
 """
 Installer for the GardenBot Deimos add-on.
 
-Copies gardener.py + world_to_screen.py into your Deimos `src/` folder, then tells you the one
-small Deimos.py edit that binds the Ctrl+Alt+G hotkey.
+Copies gardener.py + world_to_screen.py into your Deimos `src/` folder, then tells you the
+small Deimos.py edit that binds the Ctrl+Alt+G (plant) and Ctrl+Alt+H (harvest) hotkeys.
 
 Usage:
     python install.py "C:\\path\\to\\Deimos-Wizard101"
@@ -19,9 +19,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 FILES = ["gardener.py", "world_to_screen.py"]
 
 WIRING = r'''
-# ---- 1) a hotkey handler (put it next to the other `async def *_hotkey()` handlers) ----
+# ---- 1) hotkey handlers (put them next to the other `async def *_hotkey()` handlers) ----
 	async def garden_hotkey():
-		# Ctrl+Alt+G -> run the gardener on the hooked client. Reload each press so edits apply.
+		# Ctrl+Alt+G -> plant. Reload each press so edits to gardener.py apply without a restart.
 		import importlib
 		from src import gardener
 		try:
@@ -34,13 +34,32 @@ WIRING = r'''
 			return
 		await gardener.run_diagnostic(c)
 
-# ---- 2) register it where the listener is set up (near the other add_hotkey calls) ----
+	async def harvest_hotkey():
+		# Ctrl+Alt+H -> harvest every ready plant. Reload each press so edits apply.
+		import importlib
+		from src import gardener
+		try:
+			importlib.reload(gardener)
+		except Exception as e:
+			logger.error(f'[garden] reload failed: {e}')
+		c = get_foreground_client()
+		if c is None:
+			logger.warning('[garden] no hooked client selected.')
+			return
+		await gardener.run_harvest(c)
+
+# ---- 2) register them where the listener is set up (near the other add_hotkey calls) ----
+	_gmods = ModifierKeys.CTRL | ModifierKeys.ALT | ModifierKeys.NOREPEAT
 	try:
-		await listener.add_hotkey(Keycode.G, garden_hotkey,
-		                          modifiers=ModifierKeys.CTRL | ModifierKeys.ALT | ModifierKeys.NOREPEAT)
-		logger.debug("Garden hotkey bound: G ['CTRL', 'ALT']")
+		await listener.add_hotkey(Keycode.G, garden_hotkey, modifiers=_gmods)
+		await listener.add_hotkey(Keycode.H, harvest_hotkey, modifiers=_gmods)
+		logger.debug("Garden hotkeys bound: G (plant) / H (harvest) ['CTRL', 'ALT']")
 	except Exception as e:
-		logger.debug(f'Failed to register garden hotkey: {e}')
+		logger.debug(f'Failed to register garden hotkeys: {e}')
+
+# ---- NOTE: if your Deimos disables hotkeys when the client loses focus (an enable/disable
+#      cycle with an "always-bound" exclude list), add "garden"/"harvest" to that exclude
+#      list too -- otherwise these stop firing after the first tab-out. ----
 '''
 
 
@@ -87,13 +106,16 @@ def main():
         txt = open(dp, encoding="utf-8").read()
     except Exception:
         txt = ""
-    if "gardener" in txt and "run_diagnostic" in txt:
-        print("\nDeimos.py already calls the gardener -- you're set. Restart Deimos and press Ctrl+Alt+G.")
+    if "run_harvest" in txt and "run_diagnostic" in txt:
+        print("\nDeimos.py already wires both gardener hotkeys -- you're set. Restart Deimos;")
+        print("Ctrl+Alt+G plants, Ctrl+Alt+H harvests.")
     else:
-        print("\nLast step: add the hotkey to Deimos.py (one handler + one registration), then")
-        print("restart Deimos. Paste this where it fits your version (see README.md):")
+        print("\nLast step: add the hotkeys to Deimos.py (handlers + registrations), then restart")
+        print("Deimos. Paste this where it fits your version (see README.md). If garden_hotkey is")
+        print("already present, just add the harvest_hotkey handler + its add_hotkey line:")
         print(WIRING)
-    print("Then: stand in your garden and press CTRL+ALT+G. Edit src/gardener.py SEED_SLOT for your seeds.")
+    print("Then: stand in your garden -- CTRL+ALT+G plants, CTRL+ALT+H harvests. SEED_SLOT in")
+    print("src/gardener.py is an OPTIONAL hint; the planter auto-detects the seed slot per soil size.")
 
 
 if __name__ == "__main__":

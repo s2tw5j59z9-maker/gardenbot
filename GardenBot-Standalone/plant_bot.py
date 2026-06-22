@@ -3,6 +3,7 @@ GardenBot (standalone) -- Wizard101 garden auto-planter.
 
 Hooks the running Wizard101 client. Then:
     CTRL+ALT+G  -> plant the bed you're standing in (opens menu, top-down freecam, plants all)
+    CTRL+ALT+H  -> harvest every ready plant in the bed (teleports to each, taps X; loops til done)
     CTRL+ALT+S  -> scan: write _garden_scan.txt (your soil plots + sizes -- use to set SEED_SLOT)
     CTRL+ALT+K  -> quit
 
@@ -47,7 +48,7 @@ async def main():
         return
 
     print("\nHooked. Stand in your garden bed, then:")
-    print("   CTRL+ALT+G = plant      CTRL+ALT+S = scan soil      CTRL+ALT+K = quit\n")
+    print("   CTRL+ALT+G = plant   CTRL+ALT+H = harvest   CTRL+ALT+S = scan soil   CTRL+ALT+K = quit\n")
 
     stop_event = asyncio.Event()
     busy = asyncio.Lock()
@@ -68,6 +69,10 @@ async def main():
         await _guarded(gardener.run_diagnostic,
                        "Done. Reposition / restock, then CTRL+ALT+G again. CTRL+ALT+K to quit.\n")
 
+    async def harvest():
+        await _guarded(gardener.run_harvest,
+                       "Harvest done. CTRL+ALT+H again to re-sweep, CTRL+ALT+G to plant, CTRL+ALT+K to quit.\n")
+
     async def scan():
         await _guarded(gardener.garden_scan,
                        f"Scan written next to gardener.py (_garden_scan.txt).\n")
@@ -78,6 +83,7 @@ async def main():
 
     listener = HotkeyListener()
     await listener.add_hotkey(Keycode.G, plant, modifiers=MODS)
+    await listener.add_hotkey(Keycode.H, harvest, modifiers=MODS)
     await listener.add_hotkey(Keycode.S, scan, modifiers=MODS)
     await listener.add_hotkey(Keycode.K, quit_bot, modifiers=MODS)
     listener.start()

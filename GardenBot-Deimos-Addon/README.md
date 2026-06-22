@@ -1,9 +1,10 @@
 # GardenBot // Deimos add-on
 
-Adds a Ctrl+Alt+G garden auto-planter to an existing [Deimos] install. It reuses Deimos's
-already-hooked client (no second hook, no restart of the game), opens the gardening menu, points
-the camera straight down over the bed you're standing near, and plants every empty plot with the
-matching seed.
+Adds a Ctrl+Alt+G garden auto-planter (and a Ctrl+Alt+H auto-harvester) to an existing [Deimos]
+install. It reuses Deimos's already-hooked client (no second hook, no restart of the game), opens
+the gardening menu, points the camera straight down over the bed you're standing near, and plants
+every empty plot with the matching seed. Harvesting teleports to each ready plant and collects it,
+looping until the bed is clear.
 USE AT YOUR OWN RISK -- automation violates the Wizard101 Terms of Service.
 
 For people not running Deimos, use the standalone version instead (separate folder).
@@ -20,14 +21,14 @@ For people not running Deimos, use the standalone version instead (separate fold
    and you've customized it, keep yours, the gardener only needs `get_camera_state` /
    `project_point` / `world_to_screen` from it.)
 
-2. Wire the hotkey in `Deimos.py` (the installer prints this too). The only requirement is
-   that something calls `gardener.run_diagnostic(client)` on a hooked client. In this Deimos
-   fork that's two small additions:
+2. Wire the hotkeys in `Deimos.py` (the installer prints this too). The requirement is that
+   something calls `gardener.run_diagnostic(client)` (plant) and `gardener.run_harvest(client)`
+   (harvest) on a hooked client. In this Deimos fork that's two small additions:
 
-   a) A handler | put it beside the other `async def *_hotkey()` functions:
+   a) Handlers | put them beside the other `async def *_hotkey()` functions:
    ```python
    async def garden_hotkey():
-       # Ctrl+Alt+G -> run the gardener on the hooked client. Reload each press so edits apply.
+       # Ctrl+Alt+G -> plant. Reload each press so edits to gardener.py apply without a restart.
        import importlib
        from src import gardener
        try:
@@ -39,48 +40,68 @@ For people not running Deimos, use the standalone version instead (separate fold
            logger.warning('[garden] no hooked client selected.')
            return
        await gardener.run_diagnostic(c)
+
+   async def harvest_hotkey():
+       # Ctrl+Alt+H -> harvest every ready plant on the hooked client.
+       import importlib
+       from src import gardener
+       try:
+           importlib.reload(gardener)
+       except Exception as e:
+           logger.error(f'[garden] reload failed: {e}')
+       c = get_foreground_client()
+       if c is None:
+           logger.warning('[garden] no hooked client selected.')
+           return
+       await gardener.run_harvest(c)
    ```
 
-   b) A registration | where the `HotkeyListener` is set up, near the other `add_hotkey`
-   calls:
+   b) Registrations | where the `HotkeyListener` is set up, near the other `add_hotkey` calls:
    ```python
+   _gmods = ModifierKeys.CTRL | ModifierKeys.ALT | ModifierKeys.NOREPEAT
    try:
-       await listener.add_hotkey(Keycode.G, garden_hotkey,
-                                 modifiers=ModifierKeys.CTRL | ModifierKeys.ALT | ModifierKeys.NOREPEAT)
-       logger.debug("Garden hotkey bound: G ['CTRL', 'ALT']")
+       await listener.add_hotkey(Keycode.G, garden_hotkey, modifiers=_gmods)
+       await listener.add_hotkey(Keycode.H, harvest_hotkey, modifiers=_gmods)
+       logger.debug("Garden hotkeys bound: G (plant) / H (harvest) ['CTRL', 'ALT']")
    except Exception as e:
-       logger.debug(f'Failed to register garden hotkey: {e}')
+       logger.debug(f'Failed to register garden hotkeys: {e}')
    ```
 
    > Adapt names to your Deimos version if needed: `get_foreground_client()` is just "the hooked
-   > client you want to plant on," and `listener` is your `HotkeyListener`. `Keycode` /
-   > `ModifierKeys` are already imported at the top of Deimos.py (`from wizwalker import ...`).
-   > The `importlib.reload` means you can edit `src/gardener.py` and re-press the hotkey without
-   > restarting Deimos.
+   > client you want," and `listener` is your `HotkeyListener`. `Keycode` / `ModifierKeys` are
+   > already imported at the top of Deimos.py. `importlib.reload` lets you edit `src/gardener.py`
+   > and re-press a hotkey without restarting Deimos.
+   > **If your Deimos disables hotkeys when the client loses focus** (an enable/disable cycle with
+   > an "always-bound" exclude list), add `garden`/`harvest` to that list too, or they'll stop
+   > firing after the first tab-out.
 
-3. Restart Deimos. On boot you should see `Garden hotkey bound: G ['CTRL', 'ALT']`.
+3. Restart Deimos. On boot you should see `Garden hotkeys bound: G (plant) / H (harvest) ['CTRL', 'ALT']`.
 
 ## Use
 
 1. Walk your character into your garden, standing next to the bed.
 2. Press Ctrl + Alt + G. It opens the menu, frames the bed top-down, and plants. It plants
    one bed per press; reposition and press again for another bed.
+3. Press Ctrl + Alt + H to harvest -- it teleports to every ready plant and collects, looping
+   until the bed is clear (no menu or camera needed). Re-press to re-sweep.
 
 Watch the Deimos console for `[garden]` lines, it logs the menu state, the camera framing
 (`freecam H=... framed`), each plant, and a final `done/ABORTED ... energy ... spent`.
 
-## One-time setup: map seeds to plot sizes
+## One-time setup: which seeds to plant
 
-Edit `src/gardener.py` -> `SEED_SLOT`:
+Put your seeds in the gardening Seeds tab, then edit `src/gardener.py` -> `SEED_SLOT` to list the
+soil sizes you want planted:
 ```python
 SEED_SLOT = {
-    "Large": 1,    # seed in slot 1 of your Seeds tab -> Large plots
-    "Medium": 2,   # slot 2 -> Medium plots
+    "Large": 1,    # plant Large plots (number = OPTIONAL slot hint; auto-detected if wrong)
+    "Medium": 1,
 }
 ```
-The number is the seed's position on the gardening Seeds tab (1 = first slot). Only listed
-sizes get planted. Not sure of your soil sizes? `gardener.garden_scan(client)` writes
-`src/_garden_scan.txt` listing every plot and its size.
+The number is just an optional hint -- the planter **auto-detects** the real Seeds-tab slot per
+size (probing slots + watching energy), so you mainly need the seeds present. Only listed sizes
+get planted. Not sure of your soil sizes? `gardener.garden_scan(client)` writes
+`src/_garden_scan.txt` listing every plot and its size. (Harvest needs no setup.)
 
 ## Notes & troubleshooting
 

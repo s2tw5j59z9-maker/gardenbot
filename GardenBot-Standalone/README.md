@@ -2,7 +2,8 @@
 
 Press one hotkey and it opens the gardening menu, swings the camera straight down over the
 bed you're standing at, and plants every empty plot with the matching seed | fastest-first,
-stopping on its own when it runs out of seeds or energy.
+stopping on its own when it runs out of seeds or energy. A second hotkey harvests every ready
+plant the same hands-free way | it teleports to each and collects, looping until the bed is clear.
 USE AT YOUR OWN RISK -- automation violates the Wizard101 Terms of Service.
 
 ---
@@ -26,31 +27,33 @@ USE AT YOUR OWN RISK -- automation violates the Wizard101 Terms of Service.
    | Hotkey | Action |
    |---|---|
    | **Ctrl + Alt + G** | Plant the bed you're standing in |
+   | **Ctrl + Alt + H** | Harvest every ready plant in the bed (teleports to each, loops until clear) |
    | **Ctrl + Alt + S** | Scan your soil -> writes `_garden_scan.txt` (use it to set up seeds) |
    | **Ctrl + Alt + K** | Quit (restores your camera) |
 
 You can reposition to another bed and press **Ctrl + Alt + G** again. It plants one bed per
 press (whatever is on screen after it frames the bed you're standing in).
 
-## One-time setup: tell it which seed goes in which plot
+## One-time setup: which seeds to plant
 
-Open **`gardener.py`** and edit the `SEED_SLOT` map near the top:
+Put the seeds you want into your gardening **Seeds tab**, then open **`gardener.py`** and edit the
+`SEED_SLOT` map near the top to list the soil **sizes** you want planted:
 
 ```python
 SEED_SLOT = {
-    "Large": 1,    # the seed in slot 1 of your Seeds tab goes in Large plots
-    "Medium": 2,   # slot 2 goes in Medium plots
-    # "Small": 3,
+    "Large": 1,    # plant Large plots (the number is an OPTIONAL slot hint -- auto-detected if wrong)
+    "Medium": 1,
+    # "Small": 1,
 }
 ```
 
 - The **size** keys (`Large`, `Medium`, `Small`, ...) are the soil sizes the **Ctrl+Alt+S** scan
-  reports for your garden (see `_garden_scan.txt`).
-- The **number** is the seed's position on the gardening **Seeds tab** (1 = first slot, 2 =
-  second, ...). Put the seed you want for that plot size in that slot, in-game.
-- Only sizes listed in `SEED_SLOT` are planted; others are skipped.
+  reports for your garden (see `_garden_scan.txt`). Only sizes listed here get planted.
+- The **number** is just an optional *hint* for which Seeds-tab slot holds that size's seed. The
+  planter **auto-detects** the real slot per size (it probes slots and watches energy), so a
+  wrong/stale number self-corrects -- you mainly just need the right seeds present in the tab.
 
-That's the only thing most people need to change.
+Harvesting needs no setup -- **Ctrl+Alt+H** finds every ready plant by its in-world marker.
 
 ## How it works (so you can trust it)
 

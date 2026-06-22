@@ -56,6 +56,13 @@ SCAN_PATH = os.path.join(_HERE, "_garden_scan.txt")
 UI_PATH = os.path.join(_HERE, "_garden_ui_tree.txt")
 EXPLORE_PATH = os.path.join(_HERE, "_garden_explore.txt")
 
+# --- harvesting ---
+HARVEST_PREFIX = "HarvestEffect"  # a ready-to-harvest plant spawns a 'HarvestEffect<Size>' entity at its coords
+HARVEST_ARRIVE = 0.25   # wait after teleport for the plant's harvest prompt to appear BEFORE pressing X
+HARVEST_SETTLE = 0.06   # wait after each X tap for the harvest to register
+HARVEST_X_TAPS = 2      # X presses per plant (the prompt can show a beat after you arrive)
+HARVEST_MAX_PASSES = 6  # re-scan/retry passes; stops early when nothing remains or a pass makes no progress
+
 
 def _dist(a, b):
     return ((a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2) ** 0.5
@@ -414,3 +421,86 @@ async def run_diagnostic(client):
     except Exception as e:
         import traceback
         logger.error(f"[garden] plant run failed: {e}\n{traceback.format_exc()}")
+
+
+async def read_harvestables(client):
+    """Ready-to-harvest plants: each spawns a 'HarvestEffect<Size>' entity at the plant's coords
+    (e.g. HarvestEffectLg). Returns [(name, loc, dist)] nearest-first."""
+    player = await client.body.position()
+    out = []
+    for e in await client.get_base_entity_list():
+        tmpl = await e.object_template()
+        if tmpl is None:
+            continue
+        name = await tmpl.object_name()
+        if name and name.startswith(HARVEST_PREFIX):
+            loc = await e.location()
+            out.append((name, loc, _dist(player, loc)))
+    out.sort(key=lambda v: v[2])
+    return out
+
+
+def _tap_key(client, vk):
+    """Tap a virtual-key via PostMessageW to the game window -- the method proven to register world
+    input (a plain key send does NOT register through synthetic input). WM_KEYDOWN/UP = 0x100/0x101."""
+    import ctypes
+    u = ctypes.windll.user32
+    u.PostMessageW(client.window_handle, 0x0100, vk, 0)
+    u.PostMessageW(client.window_handle, 0x0101, vk, 0)
+
+
+async def garden_harvest(client, arrive=HARVEST_ARRIVE, settle=HARVEST_SETTLE,
+                         x_taps=HARVEST_X_TAPS, max_passes=HARVEST_MAX_PASSES):
+    """Harvest every ready plant: teleport onto each HarvestEffect marker, wait briefly for the
+    plant's harvest prompt to appear, then tap X (proximity harvest). No freecam / clicks / energy.
+    LOOPS, re-scanning each pass and retrying what's left, until no markers remain OR a pass makes
+    no progress (so it self-confirms instead of pressing X into the void). CE-safe: live entities
+    each pass; returns to the start position when done. Speed vs reliability lives in
+    arrive/settle/x_taps -- the X-interact needs the prompt rendered, so it trades raw speed for
+    completeness (a true few-seconds sweep would need the game's memory/protocol harvest message)."""
+    from wizwalker import XYZ
+    VK_X = 0x58
+    start = await client.body.position()
+    swept = 0
+    prev_remaining = None
+    for p in range(max_passes):
+        ready = await read_harvestables(client)
+        if not ready:
+            logger.info("[garden] nothing ready to harvest (no HarvestEffect markers)." if p == 0
+                        else f"[garden] all harvested after {p} pass(es).")
+            break
+        logger.info(f"[garden] harvest pass {p + 1}: {len(ready)} ready plant(s).")
+        for name, loc, d in ready:
+            try:
+                await client.teleport(XYZ(loc.x, loc.y, loc.z), wait_on_inuse=True,
+                                      wait_on_inuse_timeout=0.5, purge_on_after_unuser_fixer=False)
+                await asyncio.sleep(arrive)          # let the harvest prompt render before pressing X
+                for _ in range(x_taps):
+                    _tap_key(client, VK_X)
+                    await asyncio.sleep(settle)
+                swept += 1
+            except Exception as e:
+                logger.warning(f"[garden] harvest at XYZ({loc.x:.0f},{loc.y:.0f},{loc.z:.0f}) failed: {e}")
+        remaining = len(await read_harvestables(client))
+        logger.info(f"[garden] pass {p + 1} done: {remaining} marker(s) remain.")
+        if remaining == 0:
+            break
+        if prev_remaining is not None and remaining >= prev_remaining:
+            logger.warning(f"[garden] no progress this pass ({remaining} remain) -- stopping.")
+            break
+        prev_remaining = remaining
+    try:
+        await client.teleport(start, wait_on_inuse=False, purge_on_after_unuser_fixer=False)
+    except Exception:
+        pass
+    logger.info(f"[garden] harvest done: {swept} TP+X attempt(s) over up to {max_passes} passes.")
+
+
+async def run_harvest(client):
+    # Hotkey entry point (plant_bot.py / a Deimos harvest hotkey calls this). Harvest all ready plants.
+    logger.info("[garden] harvest hotkey fired -- harvesting ready plants.")
+    try:
+        await garden_harvest(client)
+    except Exception as e:
+        import traceback
+        logger.error(f"[garden] harvest run failed: {e}\n{traceback.format_exc()}")
